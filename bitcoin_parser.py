@@ -2,7 +2,7 @@ import requests
 import json
 
 
-def parse(currency):
+def bitcoin_course(currency):
     data = json.loads(requests.get(url='https://blockchain.info/ru/ticker').text)
     try:
         return f'Стоимость покупки биткойна в {currency}: {data[currency]["buy"]} {data[currency]["symbol"]}'
