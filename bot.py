@@ -1,15 +1,15 @@
-import os
+from os import environ
 from dotenv import load_dotenv
 import telebot
 import requests
 import json
-import time
+from time import sleep
 
 # Загрузка переменных окружения
 load_dotenv()
 
 # Бот
-bot = telebot.TeleBot(os.environ.get('TOKEN'))
+bot = telebot.TeleBot(environ.get('TOKEN'))
 
 # Словарь с настройками пользователей (вместо БД)
 settings_dict = {}
@@ -42,29 +42,33 @@ def toggle_newsletter(user_id: int):
 def get_newsletter(user_id: int):
 	return settings_dict[user_id][1]
 
-# Клавиатура
-markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-markup.add(
-	telebot.types.KeyboardButton('Курс Bitcoin 📈'),
-	telebot.types.KeyboardButton('Выбрать валюту 💶'),
-	telebot.types.KeyboardButton('Включить расылку ✉️'),
-	telebot.types.KeyboardButton('Помощь 📎')
-)
+# Reply клавиатура
+def get_reply_keyboard(user_id: int):
+	reply_keyboard = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+	reply_keyboard.add(
+		telebot.types.KeyboardButton('Курс Bitcoin 📈'),
+		telebot.types.KeyboardButton('Выбрать валюту 💶'),
+		telebot.types.KeyboardButton('Включить рассылку 🔔' if not get_newsletter(user_id) else 'Отключить рассылку 🔕'),
+		telebot.types.KeyboardButton('Помощь 📎')
+	)
+	return reply_keyboard
 
 # Получение данных с сайта
 def get_bitcoin_data():
-	data = json.loads(requests.get(url='https://blockchain.info/ru/ticker').text)
-	return data
+	return json.loads(requests.get(url='https://blockchain.info/ru/ticker').text)
 
+# Start
 @bot.message_handler(commands=['start'])
 def welcome(message):
 	bot.send_sticker(message.chat.id, open('stickers/anon.webp', 'rb'))
+	update_settings(message.from_user.id)
 	bot.send_message(
 		message.chat.id,
 		"Привет, я умею отслеживать курс Bitcoin!\nНапиши /help, чтобы узнать, что я могу",
-		reply_markup=markup
+		reply_markup=get_reply_keyboard(message.from_user.id)
 	)
 
+# Курс
 @bot.message_handler(commands=['bitcoin'])
 def bitcoin(message):
 	data = get_bitcoin_data()
@@ -75,6 +79,7 @@ def bitcoin(message):
 		parse_mode='MarkdownV2'
 	)
 
+# Выбор валюты
 @bot.message_handler(commands=['currency'])
 def change_currency(message):
 	# Inline-кнопки выбора валюты
@@ -93,14 +98,16 @@ def change_currency(message):
 # Рассылка
 @bot.message_handler(commands=['newsletter'])
 def newsletter(message):
-	toggle_newsletter(message.chat.id)
-	if get_newsletter(message.chat.id):
-		bot.send_message(message.chat.id, 'Рассылка включена ✅')
-	else:
-		bot.send_message(message.chat.id, 'Рассылка отключена ⛔️')
-	while get_newsletter(message.chat.id):
+	toggle_newsletter(message.from_user.id)
+	bot.send_message(
+		message.chat.id,
+		'Рассылка включена ✅' if get_newsletter(message.from_user.id) else 'Рассылка отключена ⛔️',
+		reply_markup=get_reply_keyboard(message.from_user.id)
+	)
+	# TODO! Лучше сделать с помощью модуля schedule
+	while get_newsletter(message.from_user.id):
 		bitcoin(message)
-		time.sleep(300) # Каждые 5 минут
+		sleep(300) # Каждые 5 минут (300 секунд)
 
 # Обработка нажатия на кнопки
 @bot.message_handler(content_types=['text'])
@@ -109,16 +116,29 @@ def send_text(message):
 		bitcoin(message)
 	elif message.text == 'Выбрать валюту 💶':
 		change_currency(message)
-	elif message.text == 'Включить расылку ✉️':
+	elif message.text in ['Включить рассылку 🔔', 'Отключить рассылку 🔕']:
 		newsletter(message)
 	elif message.text == 'Помощь 📎':
 		help(message)
 
+# Помощь
 @bot.message_handler(commands=['help'])
 def help(message):
 	bot.send_sticker(message.chat.id, open('stickers/help.webp', 'rb'))
 	bot.send_message(
-		message.chat.id, "Помощь\n"
+		message.chat.id,
+		"""
+		*Помощь*
+		Каждой из нижеперечисленных команд \(кроме /start\) соответствует кнопка на панели кнопок\
+
+		*Команды*
+		/help \- Вызвать это меню 😳
+		/start \- Вывести приветствие, а также сбросить валюту и рассылку
+		/bitcoin \- Вывести курс Bitoin по выбранной валюте
+		/currency \- Выбрать курс валюты \(по умолчанию USD\)
+		/newsletter \- Включить/выключить рассылку \(каждые 5 минут будет приходить сообщение с текущим курсом Bitcoin по выбранной валюте\)
+		""",
+		parse_mode='MarkdownV2'
 	)
 
 # Выбор валюты из Inline-клавиатуры
